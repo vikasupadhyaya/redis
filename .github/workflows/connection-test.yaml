@@ -1,14 +1,10 @@
 # This workflow is designed to test connectivity and authentication to an
 # AWS Elastic Kubernetes Service (EKS) cluster.
-# It ensures the runner can assume the required AWS IAM Role and communicate
-# with the Kubernetes API server before any deployment attempt.
 
-name: EKS Deployment Connection Test
+name: EKS Deployment Connection Test (AWS CLI Setup)
 
 on:
-  # This workflow can be triggered manually via the GitHub Actions UI
   workflow_dispatch:
-  # Or triggered on every push to the main branch
   push:
     branches:
       - main
@@ -17,14 +13,13 @@ jobs:
   eks_connection_check:
     runs-on: ubuntu-latest
     
-    # Define environment variables. **REMEMBER TO UPDATE THESE VALUES**
+    # 🚨 REMEMBER TO UPDATE THESE ENVIRONMENT VARIABLES 🚨
     env:
       AWS_REGION: us-east-1             # <-- Set your AWS region (e.g., eu-west-1)
       EKS_CLUSTER_NAME: eks-cluster  # <-- Set your EKS cluster name
 
     permissions:
-      # Required for OIDC authentication
-      id-token: write
+      id-token: write # Required for OIDC authentication
       contents: read
 
     steps:
@@ -32,35 +27,36 @@ jobs:
       uses: actions/checkout@v4
 
     - name: 🔐 Configure AWS Credentials
+      # This step authenticates the runner using the OIDC role.
       uses: aws-actions/configure-aws-credentials@v4
       with:
-        # Replace the ARN below with the IAM Role ARN created for your OIDC provider
+        # 🚨 CHANGE THIS ARN TO YOUR SPECIFIC IAM ROLE ARN 🚨
         role-to-assume: arn:aws:iam::634250761496:role/github-actions-eks-deployer
         aws-region: ${{ env.AWS_REGION }}
         role-session-name: EKSConnectionTestSession
 
-    - name: ⚙️ Setup kubectl and EKS Context
-      # This action installs kubectl and retrieves the cluster's kubeconfig using the
-      # AWS credentials configured in the previous step.
-      uses: aws-actions/amazon-eks-setup@v2
-      with:
-        cluster-name: ${{ env.EKS_CLUSTER_NAME }}
-        aws-region: ${{ env.AWS_REGION }}
+    - name: ⚙️ Setup kubectl Context Manually (Fixed Step)
+      # We replace the failing action with a direct AWS CLI command.
+      # This command requires the runner to be authenticated (step above) and
+      # automatically retrieves and configures the kubeconfig file for kubectl.
+      run: |
+        echo "Retrieving and setting up kubeconfig for cluster: ${{ env.EKS_CLUSTER_NAME }}"
+        # The `--wait` flag ensures the command completes before moving on.
+        aws eks update-kubeconfig --name ${{ env.EKS_CLUSTER_NAME }} --region ${{ env.AWS_REGION }} --wait
 
     - name: ✅ Test Connection to EKS Cluster
       id: eks_test
-      # Run a basic kubectl command to verify the connection is live and authenticated.
-      # If this command fails (e.g., 401 Unauthorized, timeout, or cluster not found),
-      # the step will fail, stopping the workflow.
+      # This command verifies that the previous step succeeded and the runner
+      # can communicate with the EKS API server.
       run: |
-        echo "Attempting to retrieve a list of nodes from EKS cluster '${{ env.EKS_CLUSTER_NAME }}'..."
+        echo "Attempting to retrieve a list of nodes..."
         
-        # We use '--request-timeout' to prevent infinite hanging if the API server is unreachable.
+        # Use a timeout to prevent hanging if the API server is unreachable.
         kubectl get nodes --request-timeout='20s'
         
         echo "🎉 Successfully connected and authenticated to EKS cluster."
+        echo "The runner is ready for deployment."
 
     - name: 🚀 Connection Test Passed - Ready for Deployment
-      # This step will only run if all previous steps (Auth, Setup, Test) succeeded.
       run: |
-        echo "The CI runner is fully authenticated and ready to execute deployment commands against EKS."
+        echo "Deployment script execution would go here."
