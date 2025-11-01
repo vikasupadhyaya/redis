@@ -31,14 +31,19 @@ jobs:
       uses: aws-actions/configure-aws-credentials@v4
       with:
         role-to-assume: arn:aws:iam::634250761496:role/github-actions-eks-deployer
-        aws-region: ${{ env.AWS_REGION }}
+        aws-region: ${{ env.AWS_REGION }}  
 
-    - name: Set up kubectl and EKS context
+    - name: Set up kubectl and EKS context (Using Assumed Role)
       run: |
+        # This command ensures the kubeconfig context uses the currently assumed 
+        # role's credentials (set in the previous step) without attempting 
+        # a failing recursive AssumeRole.
         aws eks update-kubeconfig \
           --name ${{ env.EKS_CLUSTER_NAME }} \
-          --region ${{ env.AWS_REGION }}      
-        
+          --region ${{ env.AWS_REGION }} \
+          --role-arn arn:aws:iam::634250761496:role/github-actions-eks-deployer \
+          --alias eks-cluster
+
     - name: Setup Helm
       uses: azure/setup-helm@v4
       with:
