@@ -10,10 +10,8 @@ on:
 
 env:
   AWS_REGION: 'us-east-1'
-  # --- MANDATORY: Set your actual Account ID and Role Name here ---
   AWS_ACCOUNT_ID: '634250761496'
   AWS_EKS_DEPLOYER_ROLE_NAME: 'github-actions-eks-deployer'
-  # -----------------------------------------------------------------
   EKS_CLUSTER_NAME: 'eks-cluster'
   REDIS_HELM_CHART_PATH: './helm/redis' 
   REDIS_VALUES_FILE: 'values.yaml'
@@ -27,30 +25,39 @@ jobs:
       id-token: write
       contents: read
     
-    # Correct YAML formatting: steps are indented 2 spaces under jobs.deploy
     steps: 
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    # STEP 1: Configure AWS Credentials (OIDC)
+    # STEP 1: Configure AWS Credentials (OIDC and Output)
     - name: Configure AWS Credentials (OIDC and Output)
       id: aws-creds
+      # IMPORTANT: Must use v4 for credential output.
       uses: aws-actions/configure-aws-credentials@v4
       with:
         role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/${{ env.AWS_EKS_DEPLOYER_ROLE_NAME }}
         aws-region: ${{ env.AWS_REGION }}
-        role-session-name: GitHubActionsSession
+        # This tells the action to output the temporary credentials
+        role-session-name: GitHubActionsSession 
+        output-credentials: true # Crucial addition to expose credentials
 
-    # STEP 2: Set up kubectl and EKS context (CRITICAL FIX)
-    # This relies on the environment variables set by the previous step 
-    # and avoids the recursive AssumeRole call.
-    - name: Set up kubectl and EKS context (Using OIDC Env Credentials)
+    # STEP 2: Set up kubectl and EKS context (Final Fix)
+    # We now explicitly export the environment variables in the shell.
+    - name: Set up kubectl and EKS context (Using Explicit Credential Export)
       run: |
         echo "Updating Kubeconfig using session credentials..."
+        
+        # Export the credentials to the shell environment to prevent the recursive assume-role call
+        echo "AWS_ACCESS_KEY_ID=${{ steps.aws-creds.outputs.aws-access-key-id }}" >> $GITHUB_ENV
+        echo "AWS_SECRET_ACCESS_KEY=${{ steps.aws-creds.outputs.aws-secret-access-key }}" >> $GITHUB_ENV
+        echo "AWS_SESSION_TOKEN=${{ steps.aws-creds.outputs.aws-session-token }}" >> $GITHUB_ENV
+        
+        # Now run update-kubeconfig. It will use the exported environment variables.
         aws eks update-kubeconfig \
           --name ${{ env.EKS_CLUSTER_NAME }} \
           --region ${{ env.AWS_REGION }}
         
+        # Verify connectivity
         kubectl cluster-info
 
     - name: Setup Helm
@@ -64,7 +71,6 @@ jobs:
         helm repo update
 
     - name: Create Kubernetes Namespace if it doesn't exist
-      # This command now uses valid credentials from the updated kubeconfig
       run: kubectl create namespace ${{ env.REDIS_NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
 
     - name: Deploy Redis Cluster with Helm Upgrade (Atomic)
