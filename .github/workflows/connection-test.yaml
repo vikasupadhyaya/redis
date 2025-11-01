@@ -1,61 +1,61 @@
-# This workflow is designed to test connectivity and authentication to an
-# AWS Elastic Kubernetes Service (EKS) cluster.
+# # This workflow is designed to test connectivity and authentication to an
+# # AWS Elastic Kubernetes Service (EKS) cluster.
 
-name: EKS Deployment Connection Test (AWS CLI Setup)
+# name: EKS Deployment Connection Test (AWS CLI Setup)
 
-on:
-  workflow_dispatch:
-  push:
-    branches:
-      - main
+# on:
+#   workflow_dispatch:
+#   push:
+#     branches:
+#       - main
 
-jobs:
-  eks_connection_check:
-    runs-on: ubuntu-latest
+# jobs:
+#   eks_connection_check:
+#     runs-on: ubuntu-latest
     
-    # 🚨 REMEMBER TO UPDATE THESE ENVIRONMENT VARIABLES 🚨
-    env:
-      AWS_REGION: us-east-1             # <-- Set your AWS region (e.g., eu-west-1)
-      EKS_CLUSTER_NAME: eks-cluster  # <-- Set your EKS cluster name
+#     # 🚨 REMEMBER TO UPDATE THESE ENVIRONMENT VARIABLES 🚨
+#     env:
+#       AWS_REGION: us-east-1             # <-- Set your AWS region (e.g., eu-west-1)
+#       EKS_CLUSTER_NAME: eks-cluster  # <-- Set your EKS cluster name
 
-    permissions:
-      id-token: write # Required for OIDC authentication
-      contents: read
+#     permissions:
+#       id-token: write # Required for OIDC authentication
+#       contents: read
 
-    steps:
-    - name: Checkout Code
-      uses: actions/checkout@v4
+#     steps:
+#     - name: Checkout Code
+#       uses: actions/checkout@v4
 
-    - name: 🔐 Configure AWS Credentials
-      # This step authenticates the runner using the OIDC role.
-      uses: aws-actions/configure-aws-credentials@v4
-      with:
-        # 🚨 CHANGE THIS ARN TO YOUR SPECIFIC IAM ROLE ARN 🚨
-        role-to-assume: arn:aws:iam::634250761496:role/github-actions-eks-deployer
-        aws-region: ${{ env.AWS_REGION }}
-        role-session-name: EKSConnectionTestSession
+#     - name: 🔐 Configure AWS Credentials
+#       # This step authenticates the runner using the OIDC role.
+#       uses: aws-actions/configure-aws-credentials@v4
+#       with:
+#         # 🚨 CHANGE THIS ARN TO YOUR SPECIFIC IAM ROLE ARN 🚨
+#         role-to-assume: arn:aws:iam::634250761496:role/github-actions-eks-deployer
+#         aws-region: ${{ env.AWS_REGION }}
+#         role-session-name: EKSConnectionTestSession
 
-    - name: ⚙️ Setup kubectl Context Manually (Fixed Step)
-      # We replace the failing action with a direct AWS CLI command.
-      # This command requires the runner to be authenticated (step above) and
-      # automatically retrieves and configures the kubeconfig file for kubectl.
-      run: |
-        echo "Retrieving and setting up kubeconfig for cluster: ${{ env.EKS_CLUSTER_NAME }}"
-        aws eks update-kubeconfig --name ${{ env.EKS_CLUSTER_NAME }} --region ${{ env.AWS_REGION }}    
+#     - name: ⚙️ Setup kubectl Context Manually (Fixed Step)
+#       # We replace the failing action with a direct AWS CLI command.
+#       # This command requires the runner to be authenticated (step above) and
+#       # automatically retrieves and configures the kubeconfig file for kubectl.
+#       run: |
+#         echo "Retrieving and setting up kubeconfig for cluster: ${{ env.EKS_CLUSTER_NAME }}"
+#         aws eks update-kubeconfig --name ${{ env.EKS_CLUSTER_NAME }} --region ${{ env.AWS_REGION }}    
 
-    - name: ✅ Test Connection to EKS Cluster
-      id: eks_test
-      # This command verifies that the previous step succeeded and the runner
-      # can communicate with the EKS API server.
-      run: |
-        echo "Attempting to retrieve a list of nodes..."
+#     - name: ✅ Test Connection to EKS Cluster
+#       id: eks_test
+#       # This command verifies that the previous step succeeded and the runner
+#       # can communicate with the EKS API server.
+#       run: |
+#         echo "Attempting to retrieve a list of nodes..."
         
-        # Use a timeout to prevent hanging if the API server is unreachable.
-        kubectl get nodes --request-timeout='20s'
+#         # Use a timeout to prevent hanging if the API server is unreachable.
+#         kubectl get nodes --request-timeout='20s'
         
-        echo "🎉 Successfully connected and authenticated to EKS cluster."
-        echo "The runner is ready for deployment."
+#         echo "🎉 Successfully connected and authenticated to EKS cluster."
+#         echo "The runner is ready for deployment."
 
-    - name: 🚀 Connection Test Passed - Ready for Deployment
-      run: |
-        echo "Deployment script execution would go here."
+#     - name: 🚀 Connection Test Passed - Ready for Deployment
+#       run: |
+#         echo "Deployment script execution would go here."

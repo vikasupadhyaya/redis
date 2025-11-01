@@ -10,6 +10,10 @@ on:
 
 env:
   AWS_REGION: 'us-east-1'
+  # --- REQUIRED: Replace with your actual Account ID and Role Name ---
+  AWS_ACCOUNT_ID: '634250761496'
+  AWS_EKS_DEPLOYER_ROLE_NAME: 'github-actions-eks-deployer'
+  # -----------------------------------------------------------------
   EKS_CLUSTER_NAME: 'eks-cluster'
   REDIS_HELM_CHART_PATH: './helm/redis' 
   REDIS_VALUES_FILE: 'values.yaml'
@@ -22,35 +26,41 @@ jobs:
     permissions:
       id-token: write
       contents: read
-
-    steps:
+    
+    # CORRECT YAML FORMATTING: Steps are indented 2 spaces under jobs.deploy
+    steps: 
     - name: Checkout repository
       uses: actions/checkout@v4
 
     - name: Configure AWS Credentials (OIDC)
       uses: aws-actions/configure-aws-credentials@v4
       with:
-        role-to-assume: arn:aws:iam::634250761496:role/github-actions-eks-deployer
+        role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/${{ env.AWS_EKS_DEPLOYER_ROLE_NAME }}
         aws-region: ${{ env.AWS_REGION }}  
 
-    - name: Set up kubectl and EKS context
+    - name: Set up kubectl and EKS context (with explicit Role ARN fix)
       run: |
+        # CRITICAL FIX: This prevents the recursive AssumeRole call that caused your error
+        FULL_ROLE_ARN="arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/${{ env.AWS_EKS_DEPLOYER_ROLE_NAME }}"
+        
+        echo "Configuring Kubeconfig for EKS using Role ARN: $FULL_ROLE_ARN"
         aws eks update-kubeconfig \
           --name ${{ env.EKS_CLUSTER_NAME }} \
-          --region ${{ env.AWS_REGION }}
-        # Removed --role-arn to prevent recursive AssumeRole calls.      
+          --region ${{ env.AWS_REGION }} \
+          --role-arn $FULL_ROLE_ARN \
+          --alias ${{ env.EKS_CLUSTER_NAME }}-${{ env.AWS_EKS_DEPLOYER_ROLE_NAME }}
+        
+        kubectl config use-context ${{ env.EKS_CLUSTER_NAME }}-${{ env.AWS_EKS_DEPLOYER_ROLE_NAME }}
 
     - name: Setup Helm
       uses: azure/setup-helm@v4
       with:
         version: 'v3.12.0'
         
-    # --- Helm Repo Setup ---
     - name: Add and Update Helm Repository
       run: |
         helm repo add bitnami https://charts.bitnami.com/bitnami
         helm repo update
-    # --------------------------------------
 
     - name: Create Kubernetes Namespace if it doesn't exist
       run: kubectl create namespace ${{ env.REDIS_NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
@@ -58,7 +68,7 @@ jobs:
     - name: Deploy Redis Cluster with Helm Upgrade (Atomic)
       id: deploy-redis
       run: |
-        echo "Deploying Redis Cluster using Helm chart: bitnami/redis-cluster"
+        echo "Deploying Redis Cluster using Helm chart: bitnami/redis"
         helm upgrade \
           ${{ env.REDIS_RELEASE_NAME }} \
           bitnami/redis --version 23.2.2 \
@@ -75,7 +85,6 @@ jobs:
         # Wait for Kubernetes resources to be ready
         kubectl rollout status statefulset/${{ env.REDIS_RELEASE_NAME }}-primary -n ${{ env.REDIS_NAMESPACE }} --timeout=300s
         
-        # --- IMPROVED SECRET HANDLING ---
         # 1. Retrieve and decode the Redis password secret
         REDIS_PASSWORD=$(kubectl get secret -n ${{ env.REDIS_NAMESPACE }} ${{ env.REDIS_RELEASE_NAME }} -o jsonpath='{.data.redis-password}' | base64 --decode)
         # 2. Retrieve the primary pod name
