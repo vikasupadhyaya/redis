@@ -1,0 +1,57 @@
+# This workflow is designed to test connectivity and authentication to an
+# AWS account via OIDC, specifically by listing S3 buckets.
+
+name: AWS S3 Connection Test
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  s3_connection_check:
+    runs-on: ubuntu-latest
+    
+    # 🚨 REMEMBER TO UPDATE THESE ENVIRONMENT VARIABLES 🚨
+    env:
+      AWS_REGION: us-east-1             # <-- Set your AWS region (e.g., eu-west-1)
+
+    permissions:
+      id-token: write # Required for OIDC authentication
+      contents: read
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: 🔐 Configure AWS Credentials
+      # This step authenticates the runner using the OIDC role.
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        # 🚨 CHANGE THIS ARN TO YOUR SPECIFIC IAM ROLE ARN 🚨
+        # NOTE: This IAM role MUST have the 's3:ListAllMyBuckets' permission.
+        role-to-assume: arn:aws:iam::634250761496:role/github-actions-eks-deployer
+        aws-region: ${{ env.AWS_REGION }}
+        role-session-name: S3ConnectionTestSession
+
+    - name: 🔍 Verify Assumed IAM Role
+      # Check if the OIDC role assumption succeeded.
+      run: aws sts get-caller-identity
+
+    - name: ✅ Test Connection to S3 and List Buckets
+      id: s3_test
+      # This command verifies that the assumed role has the 's3:ListAllMyBuckets' permission.
+      run: |
+        echo "Attempting to retrieve a list of S3 buckets..."
+        
+        # If the authentication and permissions are correct, this will list all buckets 
+        # in the AWS account associated with the assumed role.
+        aws s3 ls
+        
+        echo "🎉 Successfully connected and listed S3 buckets."
+        echo "The runner is ready for general AWS API interactions."
+
+    - name: 🚀 Connection Test Passed - Ready for AWS Tasks
+      run: |
+        echo "General AWS commands (like deploying to S3 or running ECS tasks) would go here."
