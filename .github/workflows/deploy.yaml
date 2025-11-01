@@ -10,7 +10,7 @@ on:
 
 env:
   AWS_REGION: 'us-east-1'
-  # --- REQUIRED: Replace with your actual Account ID and Role Name ---
+  # --- MANDATORY: Set your actual Account ID and Role Name here ---
   AWS_ACCOUNT_ID: '634250761496'
   AWS_EKS_DEPLOYER_ROLE_NAME: 'github-actions-eks-deployer'
   # -----------------------------------------------------------------
@@ -27,30 +27,31 @@ jobs:
       id-token: write
       contents: read
     
-    # CORRECT YAML FORMATTING: Steps are indented 2 spaces under jobs.deploy
+    # Correct YAML formatting: steps are indented 2 spaces under jobs.deploy
     steps: 
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    - name: Configure AWS Credentials (OIDC)
+    # STEP 1: Configure AWS Credentials (OIDC)
+    - name: Configure AWS Credentials (OIDC and Output)
+      id: aws-creds
       uses: aws-actions/configure-aws-credentials@v4
       with:
         role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/${{ env.AWS_EKS_DEPLOYER_ROLE_NAME }}
-        aws-region: ${{ env.AWS_REGION }}  
+        aws-region: ${{ env.AWS_REGION }}
+        role-session-name: GitHubActionsSession
 
-    - name: Set up kubectl and EKS context (with explicit Role ARN fix)
+    # STEP 2: Set up kubectl and EKS context (CRITICAL FIX)
+    # This relies on the environment variables set by the previous step 
+    # and avoids the recursive AssumeRole call.
+    - name: Set up kubectl and EKS context (Using OIDC Env Credentials)
       run: |
-        # CRITICAL FIX: This prevents the recursive AssumeRole call that caused your error
-        FULL_ROLE_ARN="arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/${{ env.AWS_EKS_DEPLOYER_ROLE_NAME }}"
-        
-        echo "Configuring Kubeconfig for EKS using Role ARN: $FULL_ROLE_ARN"
+        echo "Updating Kubeconfig using session credentials..."
         aws eks update-kubeconfig \
           --name ${{ env.EKS_CLUSTER_NAME }} \
-          --region ${{ env.AWS_REGION }} \
-          --role-arn $FULL_ROLE_ARN \
-          --alias ${{ env.EKS_CLUSTER_NAME }}-${{ env.AWS_EKS_DEPLOYER_ROLE_NAME }}
+          --region ${{ env.AWS_REGION }}
         
-        kubectl config use-context ${{ env.EKS_CLUSTER_NAME }}-${{ env.AWS_EKS_DEPLOYER_ROLE_NAME }}
+        kubectl cluster-info
 
     - name: Setup Helm
       uses: azure/setup-helm@v4
@@ -63,6 +64,7 @@ jobs:
         helm repo update
 
     - name: Create Kubernetes Namespace if it doesn't exist
+      # This command now uses valid credentials from the updated kubeconfig
       run: kubectl create namespace ${{ env.REDIS_NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
 
     - name: Deploy Redis Cluster with Helm Upgrade (Atomic)
@@ -82,20 +84,15 @@ jobs:
     - name: Verify Redis Cluster Deployment Status
       run: |
         echo "Verifying Redis Cluster StatefulSet status..."
-        # Wait for Kubernetes resources to be ready
         kubectl rollout status statefulset/${{ env.REDIS_RELEASE_NAME }}-primary -n ${{ env.REDIS_NAMESPACE }} --timeout=300s
         
-        # 1. Retrieve and decode the Redis password secret
         REDIS_PASSWORD=$(kubectl get secret -n ${{ env.REDIS_NAMESPACE }} ${{ env.REDIS_RELEASE_NAME }} -o jsonpath='{.data.redis-password}' | base64 --decode)
-        # 2. Retrieve the primary pod name
         REDIS_POD=$(kubectl get pod -n ${{ env.REDIS_NAMESPACE }} -l app.kubernetes.io/instance=${{ env.REDIS_RELEASE_NAME }},app.kubernetes.io/component=primary -o jsonpath='{.items[0].metadata.name}')
         
         echo "All Redis Cluster nodes are reported ready via K8s StatefulSet."
         kubectl get pods -n ${{ env.REDIS_NAMESPACE }} -l app.kubernetes.io/instance=${{ env.REDIS_RELEASE_NAME }}
 
-        # 3. Functional Verification: Check cluster health
         echo "Running cluster check via pod: $REDIS_POD"
-        # Use the securely retrieved variable for the password
         kubectl exec -n ${{ env.REDIS_NAMESPACE }} $REDIS_POD -- redis-cli -a "$REDIS_PASSWORD" cluster info | grep "cluster_state:ok"
         
         if [ $? -ne 0 ]; then
