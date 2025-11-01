@@ -34,11 +34,11 @@ jobs:
         aws-region: ${{ env.AWS_REGION }}
 
     - name: Set up kubectl and EKS context
-      uses: aws-actions/amazon-eks-kubeconfig@v2
-      with:
-        cluster-name: ${{ env.EKS_CLUSTER_NAME }}
-        # Explicitly configure to use the OIDC assumed role (best practice)
-        role-arn: arn:aws:iam::634250761496:role/github-actions-eks-deployer
+      run: |
+        aws eks update-kubeconfig \
+          --name ${{ env.EKS_CLUSTER_NAME }} \
+          --region ${{ env.AWS_REGION }} \
+          --role-arn arn:aws:iam::634250761496:role/github-actions-eks-deployer
         
     - name: Setup Helm
       uses: azure/setup-helm@v4
