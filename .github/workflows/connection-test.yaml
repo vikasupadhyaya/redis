@@ -41,8 +41,7 @@ jobs:
       # automatically retrieves and configures the kubeconfig file for kubectl.
       run: |
         echo "Retrieving and setting up kubeconfig for cluster: ${{ env.EKS_CLUSTER_NAME }}"
-        # The `--wait` flag ensures the command completes before moving on.
-        aws eks update-kubeconfig --name ${{ env.EKS_CLUSTER_NAME }} --region ${{ env.AWS_REGION }} --wait
+        aws eks update-kubeconfig --name ${{ env.EKS_CLUSTER_NAME }} --region ${{ env.AWS_REGION }}    
 
     - name: ✅ Test Connection to EKS Cluster
       id: eks_test
