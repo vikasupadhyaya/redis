@@ -1,88 +1,97 @@
-# name: Deploy Redis Cluster to EKS
+name: Deploy Redis Cluster to EKS
 
-# on:
-#   push:
-#     branches:
-#       - main # Trigger on pushes to the main branch
-#     paths:
-#       - 'helm/redis/**' # Trigger only on changes to the Redis Helm directory
-#   workflow_dispatch: # Allows manual triggering of the workflow
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'helm/redis/**'
+  workflow_dispatch:
 
-# env:
-#   AWS_REGION: 'us-east-1' # ⚠️ REPLACE with your AWS region
-#   EKS_CLUSTER_NAME: 'eks-cluster' # ⚠️ REPLACE with your EKS cluster name
-#   # ⚠️ Ensure this path points to your custom values file!
-#   REDIS_HELM_CHART_PATH: './helm/redis' 
-#   REDIS_VALUES_FILE: 'values.yaml' # The new, correct file name
-#   REDIS_NAMESPACE: 'redis' # Kubernetes namespace for Redis
-#   REDIS_RELEASE_NAME: 'redis-cluster-ha' # Helm release name for Redis
+env:
+  AWS_REGION: 'us-east-1'
+  EKS_CLUSTER_NAME: 'eks-cluster'
+  REDIS_HELM_CHART_PATH: './helm/redis' 
+  REDIS_VALUES_FILE: 'values.yaml'
+  REDIS_NAMESPACE: 'redis'
+  REDIS_RELEASE_NAME: 'redis-cluster'
 
-# jobs:
-#   deploy:
-#     runs-on: ubuntu-latest
-#     permissions:
-#       id-token: write # Required for OIDC authentication with AWS
-#       contents: read  # Allows checkout of the repository
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
 
-#     steps:
-#     - name: Checkout repository
-#       uses: actions/checkout@v4
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
 
-#     - name: Configure AWS Credentials (OIDC)
-#       uses: aws-actions/configure-aws-credentials@v4
-#       with:
-#         # ⚠️ REPLACE with your IAM Role ARN trusted by GitHub OIDC
-#         role-to-assume: arn:aws:iam::634250761496:role/github-actions-eks-deployer
-#         aws-region: ${{ env.AWS_REGION }}
+    - name: Configure AWS Credentials (OIDC)
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: arn:aws:iam::634250761496:role/github-actions-eks-deployer
+        aws-region: ${{ env.AWS_REGION }}
 
-#     - name: Set up kubectl and EKS context
-#       uses: aws-actions/amazon-eks-kubeconfig@v2
-#       with:
-#         cluster-name: ${{ env.EKS_CLUSTER_NAME }}
+    - name: Set up kubectl and EKS context
+      uses: aws-actions/amazon-eks-kubeconfig@v2
+      with:
+        cluster-name: ${{ env.EKS_CLUSTER_NAME }}
+        # Explicitly configure to use the OIDC assumed role (best practice)
+        role-arn: arn:aws:iam::634250761496:role/github-actions-eks-deployer
         
-#     - name: Setup Helm
-#       uses: azure/setup-helm@v4
-#       with:
-#         version: 'v3.12.0'
-
-#     - name: Create Kubernetes Namespace if it doesn't exist
-#       # Ensures the target namespace exists idempotently
-#       run: kubectl create namespace ${{ env.REDIS_NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
-
-#     - name: Deploy Redis Cluster with Helm Upgrade (Atomic)
-#       id: deploy-redis
-#       run: |
-#         echo "Deploying Redis Cluster using Helm chart: bitnami/redis-cluster"
-#         helm upgrade \
-#           ${{ env.REDIS_RELEASE_NAME }} \
-#           bitnami/redis-cluster \
-#           --repo https://charts.bitnami.com/bitnami \
-#           --namespace ${{ env.REDIS_NAMESPACE }} \
-#           --values ${{ env.REDIS_HELM_CHART_PATH }}/${{ env.REDIS_VALUES_FILE }} \
-#           --install \
-#           --atomic \
-#           --wait \
-#           --timeout 15m # Increased timeout for cluster initialization
-
-#     - name: Verify Redis Cluster Deployment Status
-#       run: |
-#         echo "Verifying Redis Cluster StatefulSet status..."
-#         # Check the rollout status for the primary StatefulSet (all nodes are managed by one STS in redis-cluster chart)
-#         kubectl rollout status statefulset/${{ env.REDIS_RELEASE_NAME }} -n ${{ env.REDIS_NAMESPACE }} --timeout=300s
+    - name: Setup Helm
+      uses: azure/setup-helm@v4
+      with:
+        version: 'v3.12.0'
         
-#         # Output Pod list to confirm node count and readiness
-#         echo "All Redis Cluster nodes are reported ready:"
-#         kubectl get pods -n ${{ env.REDIS_NAMESPACE }} -l app.kubernetes.io/instance=${{ env.REDIS_RELEASE_NAME }}
+    # --- Helm Repo Setup ---
+    - name: Add and Update Helm Repository
+      run: |
+        helm repo add bitnami https://charts.bitnami.com/bitnami
+        helm repo update
+    # --------------------------------------
+
+    - name: Create Kubernetes Namespace if it doesn't exist
+      run: kubectl create namespace ${{ env.REDIS_NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
+
+    - name: Deploy Redis Cluster with Helm Upgrade (Atomic)
+      id: deploy-redis
+      run: |
+        echo "Deploying Redis Cluster using Helm chart: bitnami/redis-cluster"
+        helm upgrade \
+          ${{ env.REDIS_RELEASE_NAME }} \
+          bitnami/redis --version 23.2.2 \
+          --namespace ${{ env.REDIS_NAMESPACE }} \
+          --values ${{ env.REDIS_HELM_CHART_PATH }}/${{ env.REDIS_VALUES_FILE }} \
+          --install \
+          --atomic \
+          --wait \
+          --timeout 15m
+
+    - name: Verify Redis Cluster Deployment Status
+      run: |
+        echo "Verifying Redis Cluster StatefulSet status..."
+        # Wait for Kubernetes resources to be ready
+        kubectl rollout status statefulset/${{ env.REDIS_RELEASE_NAME }}-primary -n ${{ env.REDIS_NAMESPACE }} --timeout=300s
         
-#         # Additional Verification: Check cluster health (requires redis-cli or similar)
-#         # This step verifies the *functional* cluster status, not just K8s readiness.
-#         # It attempts to exec into the first pod and run the cluster check command.
-#         REDIS_POD=$(kubectl get pod -n ${{ env.REDIS_NAMESPACE }} -l app.kubernetes.io/instance=${{ env.REDIS_RELEASE_NAME }},app.kubernetes.io/component=primary -o jsonpath='{.items[0].metadata.name}')
-#         echo "Running cluster check via pod: $REDIS_POD"
-#         kubectl exec -n ${{ env.REDIS_NAMESPACE }} $REDIS_POD -- redis-cli -a $(kubectl get secret -n ${{ env.REDIS_NAMESPACE }} ${{ env.REDIS_RELEASE_NAME }} -o jsonpath='{.data.redis-password}' | base64 --decode) cluster info | grep "cluster_state:ok"
-#         if [ $? -ne 0 ]; then
-#           echo "ERROR: Redis Cluster state is NOT OK."
-#           exit 1
-#         else
-#           echo "SUCCESS: Redis Cluster state is OK."
-#         fi
+        # --- IMPROVED SECRET HANDLING ---
+        # 1. Retrieve and decode the Redis password secret
+        REDIS_PASSWORD=$(kubectl get secret -n ${{ env.REDIS_NAMESPACE }} ${{ env.REDIS_RELEASE_NAME }} -o jsonpath='{.data.redis-password}' | base64 --decode)
+        # 2. Retrieve the primary pod name
+        REDIS_POD=$(kubectl get pod -n ${{ env.REDIS_NAMESPACE }} -l app.kubernetes.io/instance=${{ env.REDIS_RELEASE_NAME }},app.kubernetes.io/component=primary -o jsonpath='{.items[0].metadata.name}')
+        
+        echo "All Redis Cluster nodes are reported ready via K8s StatefulSet."
+        kubectl get pods -n ${{ env.REDIS_NAMESPACE }} -l app.kubernetes.io/instance=${{ env.REDIS_RELEASE_NAME }}
+
+        # 3. Functional Verification: Check cluster health
+        echo "Running cluster check via pod: $REDIS_POD"
+        # Use the securely retrieved variable for the password
+        kubectl exec -n ${{ env.REDIS_NAMESPACE }} $REDIS_POD -- redis-cli -a "$REDIS_PASSWORD" cluster info | grep "cluster_state:ok"
+        
+        if [ $? -ne 0 ]; then
+          echo "ERROR: Redis Cluster state is NOT OK. Check logs for detail."
+          exit 1
+        else
+          echo "SUCCESS: Redis Cluster state is OK. 🎉"
+        fi

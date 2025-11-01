@@ -21,8 +21,8 @@ global:
   ##   - myRegistryKeySecretName
   ##
   imagePullSecrets: []
-  defaultStorageClass: "local-path"
-  storageClass: "local-path"
+  defaultStorageClass: "gp2"
+  storageClass: "gp2"
   ## Security parameters
   ##
   security:
@@ -540,7 +540,7 @@ master:
     ## If set to "-", storageClassName: "", which disables dynamic provisioning
     ## If undefined (the default) or set to null, no storageClassName spec is set, choosing the default provisioner
     ##
-    storageClass: "local-path"
+    storageClass: "gp2"
     ## @param master.persistence.accessModes Persistent Volume access modes
     ##
     accessModes:
@@ -1029,7 +1029,7 @@ replica:
     ## If set to "-", storageClassName: "", which disables dynamic provisioning
     ## If undefined (the default) or set to null, no storageClassName spec is set, choosing the default provisioner
     ##
-    storageClass: "local-path"
+    storageClass: "gp2"
     ## @param replica.persistence.accessModes Persistent Volume access modes
     ##
     accessModes:
@@ -1354,7 +1354,7 @@ sentinel:
     ## If set to "-", storageClassName: "", which disables dynamic provisioning
     ## If undefined (the default) or set to null, no storageClassName spec is set, choosing the default provisioner
     ##
-    storageClass: "local-path"
+    storageClass: "gp2"
     ## @param sentinel.persistence.accessModes Persistent Volume access modes
     ##
     accessModes:
